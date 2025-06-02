@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "InfiniCraft Syncer",
+  "version": "1.0",
+  "permissions": ["scripting", "storage", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["https://neal.fun/infinite-craft/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
