@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from flask import request, abort
 import threading
 import requests
 import time
@@ -88,6 +89,9 @@ def merged_result():
 @app.route('/get_command', methods=['GET'])
 def get_command():
     print("📥 Extension requested command")
+    if request.content_length and request.content_length > 1_000_000:
+        abort(413)  # Payload Too Large
+    data = request.get_data()
     if pause==False:
         if add_command_queue:
             print("add_command_queue",add_command_queue)
