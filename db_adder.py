@@ -67,8 +67,6 @@ def merged_result():
         print(f"✅ New item added to list_items: {item_name}")
 
         # Queue it for DB insertion via extension
-        print (data)
-        0/0
         add_command_queue.append({
             "action": "ADD_ITEM",
             "data": {
