@@ -125,7 +125,7 @@ async function checkForCommands() {
 async function loopCommands() {
   while (true) {
     await checkForCommands();
-    await new Promise(r => setTimeout(r, 5));  // 500ms delay between loops
+    await new Promise(r => setTimeout(r, 1));  // 500ms delay between loops
   }
 }
 loopCommands();
