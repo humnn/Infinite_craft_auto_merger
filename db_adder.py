@@ -2,9 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask import request, abort
 import threading
-import requests
 import time
-import pickle
 import os
 
 
@@ -16,45 +14,39 @@ merge_command_queue = []
 add_command_queue = []
 phase = "merge" 
 
-SEEN_MERGES_FILE = "seen_merges.pkl"
+SEEN_MERGES_LOG = "seen_merges.log"
 
 def load_seen_merges():
-    if os.path.exists(SEEN_MERGES_FILE):
-        try:
-            with open(SEEN_MERGES_FILE, "rb") as f:
-                return pickle.load(f)
-        except Exception as e:
-            print(f"⚠️ Error loading seen_merges: {e}")
-    return set()
+    seen = set()
+    if os.path.exists(SEEN_MERGES_LOG):
+        with open(SEEN_MERGES_LOG, "r", encoding="utf-8") as f:
+            for line in f:
+                a, b = line.strip().split("|||")
+                seen.add((a, b))
+    return seen
 
-def save_seen_merges():
-    try:
-        with open(SEEN_MERGES_FILE, "wb") as f:
-            pickle.dump(seen_merges, f)
-    except Exception as e:
-        print(f"⚠️ Error saving seen_merges: {e}")
+def append_seen_merge(pair):
+    with open(SEEN_MERGES_LOG, "a", encoding="utf-8") as f:
+        f.write(f"{pair[0]}|||{pair[1]}\n")
+
 
 seen_merges = load_seen_merges()
 def sorted_elements(a: str, b: str):
     return tuple(sorted([a, b], key=lambda x: x.lower()))
 
 
-LIST_ITEMS_FILE = "list_items.pkl"
+LIST_ITEMS_FILE = "list_items.txt"
+
 def load_list_items():
     if os.path.exists(LIST_ITEMS_FILE):
-        try:
-            with open(LIST_ITEMS_FILE, "rb") as f:
-                return pickle.load(f)
-        except Exception as e:
-            print(f"⚠️ Error loading list_items: {e}")
-    return ["Water", "Fire", "Wind", "Earth"]  # fallback
+        with open(LIST_ITEMS_FILE, "r", encoding="utf-8") as f:
+            return [line.strip() for line in f if line.strip()]
+    return ["Water", "Fire", "Wind", "Earth"]
 
-def save_list_items():
-    try:
-        with open(LIST_ITEMS_FILE, "wb") as f:
-            pickle.dump(list_items, f)
-    except Exception as e:
-        print(f"⚠️ Error saving list_items: {e}")
+def append_list_item(item):
+    with open(LIST_ITEMS_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{item}\n")
+
 list_items = load_list_items()
 
 
@@ -72,7 +64,7 @@ def scan_and_queue_merges():
                 pair = (first, second)
                 if pair not in seen_merges:
                     seen_merges.add(pair)
-                    save_seen_merges()
+                    append_seen_merge(pair)
                     merge_command_queue.append({
                         "action": "MERGE",
                         "data": {
@@ -118,7 +110,7 @@ def merged_result():
             }
         })
         list_items.append(item_name)
-        save_list_items()
+        append_list_item(item_name)
         phase = "add"
     else:
         print(f"⚠️ Item '{item_name}' already exists. Skipping ADD_ITEM.")
