@@ -4,16 +4,32 @@ from flask import request, abort
 import threading
 import time
 import os
+import json
 
 
 app = Flask(__name__)
 CORS(app)  # Allow Chrome extension cross-origin requests
 
 received_data = []
-merge_command_queue = []
-add_command_queue = []
 phase = "merge" 
+MERGE_COMMANDS_LOG = "merge_command_queue.log"
+ADD_COMMANDS_LOG = "add_command_queue.log"
+def load_command_queue(file_path):
+    queue = []
+    if os.path.exists(file_path):
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    queue.append(json.loads(line.strip()))
+                except json.JSONDecodeError as e:
+                    print(f"⚠️ Skipped bad line in {file_path}: {e}")
+    return queue
 
+def append_command(file_path, command):
+    with open(file_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(command) + "\n")
+merge_command_queue = load_command_queue(MERGE_COMMANDS_LOG)
+add_command_queue = load_command_queue(ADD_COMMANDS_LOG)
 SEEN_MERGES_LOG = "seen_merges.log"
 
 def load_seen_merges():
@@ -76,14 +92,16 @@ def scan_and_queue_merges():
                 if pair not in seen_merges:
                     seen_merges.add(pair)
                     append_seen_merge(pair)
-                    merge_command_queue.append({
+                    command = {
                         "action": "MERGE",
                         "data": {
                             "first": first,
                             "second": second,
                             "saveId": 0
                         }
-                    })
+                    }
+                    merge_command_queue.append(command)
+                    append_command(MERGE_COMMANDS_LOG, command)
                     new_found = True
 
         if not new_found:
@@ -109,7 +127,7 @@ def merged_result():
         print(f"✅ New item added to list_items: {item_name}")
 
         # Queue it for DB insertion via extension
-        add_command_queue.append({
+        command={
             "action": "ADD_ITEM",
             "data": {
                 "discovery":data.get("isNew",""),
@@ -119,7 +137,9 @@ def merged_result():
                 "emoji": data.get("emoji", "❓"),
                 "recipes": data.get("recipes", [])
             }
-        })
+        }
+        add_command_queue.append(command)
+        append_command(ADD_COMMANDS_LOG, command)
         list_items.append(item_name)
         append_list_item(item_name)
         phase = "add"
