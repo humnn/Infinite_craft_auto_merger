@@ -4,6 +4,8 @@ from flask import request, abort
 import threading
 import requests
 import time
+import pickle
+import os
 
 
 app = Flask(__name__)
@@ -12,12 +14,48 @@ CORS(app)  # Allow Chrome extension cross-origin requests
 received_data = []
 merge_command_queue = []
 add_command_queue = []
-seen_merges = set()
 phase = "merge" 
+
+SEEN_MERGES_FILE = "seen_merges.pkl"
+
+def load_seen_merges():
+    if os.path.exists(SEEN_MERGES_FILE):
+        try:
+            with open(SEEN_MERGES_FILE, "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"⚠️ Error loading seen_merges: {e}")
+    return set()
+
+def save_seen_merges():
+    try:
+        with open(SEEN_MERGES_FILE, "wb") as f:
+            pickle.dump(seen_merges, f)
+    except Exception as e:
+        print(f"⚠️ Error saving seen_merges: {e}")
+
+seen_merges = load_seen_merges()
 def sorted_elements(a: str, b: str):
     return tuple(sorted([a, b], key=lambda x: x.lower()))
-list_items=["Water","Fire","Wind","Earth"]
 
+
+LIST_ITEMS_FILE = "list_items.pkl"
+def load_list_items():
+    if os.path.exists(LIST_ITEMS_FILE):
+        try:
+            with open(LIST_ITEMS_FILE, "rb") as f:
+                return pickle.load(f)
+        except Exception as e:
+            print(f"⚠️ Error loading list_items: {e}")
+    return ["Water", "Fire", "Wind", "Earth"]  # fallback
+
+def save_list_items():
+    try:
+        with open(LIST_ITEMS_FILE, "wb") as f:
+            pickle.dump(list_items, f)
+    except Exception as e:
+        print(f"⚠️ Error saving list_items: {e}")
+list_items = load_list_items()
 
 
 def scan_and_queue_merges():
@@ -34,6 +72,7 @@ def scan_and_queue_merges():
                 pair = (first, second)
                 if pair not in seen_merges:
                     seen_merges.add(pair)
+                    save_seen_merges()
                     merge_command_queue.append({
                         "action": "MERGE",
                         "data": {
@@ -70,7 +109,7 @@ def merged_result():
         add_command_queue.append({
             "action": "ADD_ITEM",
             "data": {
-                "discovery":data.get("isNew",False),
+                "discovery":data.get("isNew",""),
                 "id": 999,
                 "saveId": 0,
                 "text": data["text"],
@@ -79,6 +118,7 @@ def merged_result():
             }
         })
         list_items.append(item_name)
+        save_list_items()
         phase = "add"
     else:
         print(f"⚠️ Item '{item_name}' already exists. Skipping ADD_ITEM.")
