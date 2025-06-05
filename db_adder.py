@@ -5,20 +5,23 @@ import threading
 import time
 import os
 import json
+from threading import Lock
 
 
 app = Flask(__name__)
 CORS(app)  # Allow Chrome extension cross-origin requests
-
+add_log_lock = Lock()
+merge_log_lock = Lock()
 received_data = []
 phase = "merge" 
 MERGE_COMMANDS_LOG = "merge_command_queue.log"
 ADD_COMMANDS_LOG = "add_command_queue.log"
-def remove_first_line_from_file(file_path):
-    with open(file_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.writelines(lines[1:])
+def remove_first_line_from_file(file_path ,lock):
+    with lock:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.writelines(lines[1:])
 def load_command_queue(file_path):
     queue = []
     if os.path.exists(file_path):
@@ -30,9 +33,10 @@ def load_command_queue(file_path):
                     print(f"⚠️ Skipped bad line in {file_path}: {e}")
     return queue
 
-def append_command(file_path, command):
-    with open(file_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(command) + "\n")
+def append_command(file_path, command ,lock):
+    with lock:
+        with open(file_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(command) + "\n")
 merge_command_queue = load_command_queue(MERGE_COMMANDS_LOG)
 add_command_queue = load_command_queue(ADD_COMMANDS_LOG)
 SEEN_MERGES_LOG = "seen_merges.log"
@@ -106,7 +110,7 @@ def scan_and_queue_merges():
                         }
                     }
                     merge_command_queue.append(command)
-                    append_command(MERGE_COMMANDS_LOG, command)
+                    append_command(MERGE_COMMANDS_LOG, command ,merge_log_lock)
                     new_found = True
 
         if not new_found:
@@ -144,7 +148,7 @@ def merged_result():
             }
         }
         add_command_queue.append(command)
-        append_command(ADD_COMMANDS_LOG, command)
+        append_command(ADD_COMMANDS_LOG, command ,add_log_lock)
         list_items.append(item_name)
         append_list_item(item_name)
         phase = "add"
@@ -165,12 +169,12 @@ def get_command():
         if add_command_queue:
             print("add_command_queue",add_command_queue)
             command = add_command_queue.pop(0)
-            remove_first_line_from_file(ADD_COMMANDS_LOG)
+            remove_first_line_from_file(ADD_COMMANDS_LOG ,add_log_lock)
             print("📤 Sent ADD_ITEM:", command)
             return jsonify(command)
         if merge_command_queue:
             command = merge_command_queue.pop(0)
-            remove_first_line_from_file(MERGE_COMMANDS_LOG)
+            remove_first_line_from_file(MERGE_COMMANDS_LOG ,merge_log_lock)
             print("📤 Sent MERGE:", command)
             return jsonify(command)
     return jsonify({"status": "no_command"}), 200
