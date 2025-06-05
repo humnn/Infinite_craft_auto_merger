@@ -36,14 +36,6 @@ def sorted_elements(a: str, b: str):
 
 
 LIST_ITEMS_FILE = "list_items.txt"
-
-def load_list_items():
-    if os.path.exists(LIST_ITEMS_FILE):
-        with open(LIST_ITEMS_FILE, "r", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip()]
-    return ["Water", "Fire", "Wind", "Earth"]
-
-
 DEFAULT_ITEMS = ["Water", "Fire", "Wind", "Earth"]
 
 def load_list_items():
@@ -63,6 +55,9 @@ def load_list_items():
 
     return list(existing)
 
+def append_list_item(item):
+    with open(LIST_ITEMS_FILE, "a", encoding="utf-8") as f:
+        f.write(f"{item}\n")
 
 list_items = load_list_items()
 
