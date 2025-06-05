@@ -43,12 +43,28 @@ def load_list_items():
             return [line.strip() for line in f if line.strip()]
     return ["Water", "Fire", "Wind", "Earth"]
 
-def append_list_item(item):
-    with open(LIST_ITEMS_FILE, "a", encoding="utf-8") as f:
-        f.write(f"{item}\n")
+
+DEFAULT_ITEMS = ["Water", "Fire", "Wind", "Earth"]
+
+def load_list_items():
+    existing = set()
+    
+    if os.path.exists(LIST_ITEMS_FILE):
+        with open(LIST_ITEMS_FILE, "r", encoding="utf-8") as f:
+            existing = set(line.strip() for line in f if line.strip())
+
+    # Add missing defaults
+    missing_defaults = [item for item in DEFAULT_ITEMS if item not in existing]
+    if missing_defaults:
+        with open(LIST_ITEMS_FILE, "a", encoding="utf-8") as f:
+            for item in missing_defaults:
+                f.write(f"{item}\n")
+                existing.add(item)
+
+    return list(existing)
+
 
 list_items = load_list_items()
-
 
 def scan_and_queue_merges():
     print("🌀 Merge scanner started")
