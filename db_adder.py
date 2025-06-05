@@ -14,6 +14,11 @@ received_data = []
 phase = "merge" 
 MERGE_COMMANDS_LOG = "merge_command_queue.log"
 ADD_COMMANDS_LOG = "add_command_queue.log"
+def remove_first_line_from_file(file_path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.writelines(lines[1:])
 def load_command_queue(file_path):
     queue = []
     if os.path.exists(file_path):
@@ -160,10 +165,12 @@ def get_command():
         if add_command_queue:
             print("add_command_queue",add_command_queue)
             command = add_command_queue.pop(0)
+            remove_first_line_from_file(ADD_COMMANDS_LOG)
             print("📤 Sent ADD_ITEM:", command)
             return jsonify(command)
         if merge_command_queue:
             command = merge_command_queue.pop(0)
+            remove_first_line_from_file(MERGE_COMMANDS_LOG)
             print("📤 Sent MERGE:", command)
             return jsonify(command)
     return jsonify({"status": "no_command"}), 200
