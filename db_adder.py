@@ -6,56 +6,162 @@ import time
 import os
 import json
 from threading import Lock
-
+import re
 
 app = Flask(__name__)
 CORS(app)  # Allow Chrome extension cross-origin requests
 add_log_lock = Lock()
 merge_log_lock = Lock()
+seen_merge_log_lock = Lock()
 received_data = []
 phase = "merge" 
 MERGE_COMMANDS_LOG = "merge_command_queue.log"
 ADD_COMMANDS_LOG = "add_command_queue.log"
-def remove_first_line_from_file(file_path ,lock):
+def pop_command_chunked(base_name, lock):
     with lock:
-        with open(file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.writelines(lines[1:])
-def load_command_queue(file_path):
-    queue = []
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    queue.append(json.loads(line.strip()))
-                except json.JSONDecodeError as e:
-                    print(f"⚠️ Skipped bad line in {file_path}: {e}")
-    return queue
+        dir_path = base_name
+        meta_path = os.path.join(dir_path, "meta.json")
+        if not os.path.exists(meta_path):
+            return None
 
-def append_command(file_path, command ,lock):
+        with open(meta_path, "r") as f:
+            meta = json.load(f)
+
+        read_idx = meta["read_file_index"]
+        offset = meta["read_line_offset"]
+
+        while True:
+            file_path = os.path.join(dir_path, f"{read_idx}.log")
+
+            if not os.path.exists(file_path):
+                return None  # No more data
+
+            with open(file_path, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            if offset >= len(lines):
+                # Move to next file (no deletion)
+                read_idx += 1
+                offset = 0
+                meta["read_file_index"] = read_idx
+                meta["read_line_offset"] = offset
+                with open(meta_path, "w") as f:
+                    json.dump(meta, f)
+                continue  # 🔁 Retry with next file
+
+            # Return line
+            command = json.loads(lines[offset])
+            meta["read_line_offset"] = offset + 1
+            with open(meta_path, "w") as f:
+                json.dump(meta, f)
+
+            return command
+
+
+
+def append_command_chunked(command, base_name, lock, max_lines=1000):
     with lock:
+        dir_path = base_name
+        os.makedirs(dir_path, exist_ok=True)  # 🔹 Create folder if not exists
+
+        meta_path = os.path.join(dir_path, "meta.json")
+
+        # Load or init meta
+        if os.path.exists(meta_path):
+            with open(meta_path, "r") as f:
+                meta = json.load(f)
+        else:
+            meta = {
+                "write_file_index": 1,
+                "write_line_count": 0,
+                "read_file_index": 1,
+                "read_line_offset": 0
+            }
+
+        # Prepare file path
+        idx = meta["write_file_index"]
+        count = meta["write_line_count"]
+        file_path = os.path.join(dir_path, f"{idx}.log")
+
+        # Append
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(command) + "\n")
-merge_command_queue = load_command_queue(MERGE_COMMANDS_LOG)
-add_command_queue = load_command_queue(ADD_COMMANDS_LOG)
+
+        # Rotate
+        count += 1
+        if count >= max_lines:
+            idx += 1
+            count = 0
+
+        # Save updated meta
+        meta["write_file_index"] = idx
+        meta["write_line_count"] = count
+
+        with open(meta_path, "w") as f:
+            json.dump(meta, f)
+
+def load_lines_from_file_chunks(base_dir, parser=lambda x: x.strip(), skip_bad=True):
+    data = []
+
+    meta_path = os.path.join(base_dir, "meta.json")
+    if not os.path.exists(meta_path):
+        print(f"⚠️ No meta.json found in {base_dir}")
+        return data
+
+    # Load meta info
+    with open(meta_path, "r") as f:
+        meta = json.load(f)
+
+    start_file_index = meta.get("read_file_index", 1)
+    start_line_offset = meta.get("read_line_offset", 0)
+
+    # Match files like 1.log, 2.log inside the folder
+    pattern = re.compile(r"^(\d+)\.log$")
+    chunk_files = []
+    for fname in os.listdir(base_dir):
+        match = pattern.match(fname)
+        if match:
+            chunk_files.append((int(match.group(1)), fname))
+
+    chunk_files.sort()
+
+    for file_index, fname in chunk_files:
+        # Skip older chunks
+        if file_index < start_file_index:
+            continue
+
+        file_path = os.path.join(base_dir, fname)
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        # Apply offset only to the first file being read
+        offset = start_line_offset if file_index == start_file_index else 0
+
+        for line in lines[offset:]:
+            try:
+                data.append(parser(line))
+            except Exception as e:
+                if skip_bad:
+                    print(f"⚠️ Skipped line in {fname}: {e}")
+
+    return data
+
+merge_command_queue = load_lines_from_file_chunks(
+    base_dir="merge_command",
+    parser=json.loads
+)
+add_command_queue = load_lines_from_file_chunks(
+    base_dir="add_command",
+    parser=json.loads
+)
 SEEN_MERGES_LOG = "seen_merges.log"
 
-def load_seen_merges():
-    seen = set()
-    if os.path.exists(SEEN_MERGES_LOG):
-        with open(SEEN_MERGES_LOG, "r", encoding="utf-8") as f:
-            for line in f:
-                a, b = line.strip().split("|||")
-                seen.add((a, b))
-    return seen
-
-def append_seen_merge(pair):
-    with open(SEEN_MERGES_LOG, "a", encoding="utf-8") as f:
-        f.write(f"{pair[0]}|||{pair[1]}\n")
 
 
-seen_merges = load_seen_merges()
+seen_merges = set(tuple(x) for x in load_lines_from_file_chunks(
+    base_dir="seen_merges",
+    parser=json.loads
+))
 def sorted_elements(a: str, b: str):
     return tuple(sorted([a, b], key=lambda x: x.lower()))
 
@@ -89,6 +195,7 @@ list_items = load_list_items()
 def scan_and_queue_merges():
     print("🌀 Merge scanner started")
     idle_cycles = 0
+    global seen_merge_log_lock , merge_log_lock
 
     while True:
         current_len = len(list_items)
@@ -100,7 +207,11 @@ def scan_and_queue_merges():
                 pair = (first, second)
                 if pair not in seen_merges:
                     seen_merges.add(pair)
-                    append_seen_merge(pair)
+                    append_command_chunked(
+                        command=pair,                    # Example: ("Fire", "Water")
+                        base_name="seen_merges",        # Folder where logs are stored
+                        lock=seen_merge_log_lock             # Use a dedicated lock
+                    )
                     command = {
                         "action": "MERGE",
                         "data": {
@@ -110,7 +221,7 @@ def scan_and_queue_merges():
                         }
                     }
                     merge_command_queue.append(command)
-                    append_command(MERGE_COMMANDS_LOG, command ,merge_log_lock)
+                    append_command_chunked(command, "merge_command", merge_log_lock)
                     new_found = True
 
         if not new_found:
@@ -128,6 +239,7 @@ threading.Thread(target=scan_and_queue_merges, daemon=True).start()
 
 @app.route('/merged_result', methods=['POST'])
 def merged_result():
+    global add_log_lock
     data = request.json
     print("🧬 Received merged result from extension:", data)
 
@@ -148,7 +260,7 @@ def merged_result():
             }
         }
         add_command_queue.append(command)
-        append_command(ADD_COMMANDS_LOG, command ,add_log_lock)
+        append_command_chunked(command, "add_command", add_log_lock)
         list_items.append(item_name)
         append_list_item(item_name)
         phase = "add"
@@ -161,23 +273,42 @@ def merged_result():
 
 @app.route('/get_command', methods=['GET'])
 def get_command():
+    global add_log_lock, merge_log_lock
     print("📥 Extension requested command")
+
     if request.content_length and request.content_length > 1_000_000:
-        abort(413)  # Payload Too Large
+        abort(413)
+
     data = request.get_data()
-    if pause==False:
+
+    if not pause:
+        # ADD command
         if add_command_queue:
-            print("add_command_queue",add_command_queue)
-            command = add_command_queue.pop(0)
-            remove_first_line_from_file(ADD_COMMANDS_LOG ,add_log_lock)
-            print("📤 Sent ADD_ITEM:", command)
-            return jsonify(command)
+            print("add_command_queue", add_command_queue)
+            in_memory = add_command_queue.pop(0)
+            on_disk = pop_command_chunked("add_command", add_log_lock)
+
+            if in_memory != on_disk:
+                print("❌ FATAL SYNC ERROR in ADD queue")
+                raise Exception("ADD queue out of sync")
+
+            print("📤 Sent ADD_ITEM:", on_disk)
+            return jsonify(on_disk)
+
+        # MERGE command
         if merge_command_queue:
-            command = merge_command_queue.pop(0)
-            remove_first_line_from_file(MERGE_COMMANDS_LOG ,merge_log_lock)
-            print("📤 Sent MERGE:", command)
-            return jsonify(command)
+            in_memory = merge_command_queue.pop(0)
+            on_disk = pop_command_chunked("merge_command", merge_log_lock)
+
+            if in_memory != on_disk:
+                print("❌ FATAL SYNC ERROR in MERGE queue")
+                raise Exception("MERGE queue out of sync")
+
+            print("📤 Sent MERGE:", on_disk)
+            return jsonify(on_disk)
+
     return jsonify({"status": "no_command"}), 200
+
 
 
 
